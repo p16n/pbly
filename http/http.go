@@ -2,6 +2,7 @@ package http
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 
@@ -33,9 +34,40 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, string(b), http.StatusSeeOther)
 }
 
+func postHandler(w http.ResponseWriter, r *http.Request) {
+	token := viper.GetString("token")
+	if r.Header.Get("Pbly-Token") != token {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+
+	k := r.URL.Path[len("/new/"):]
+	b, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Err: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	err = db.Set(k, b)
+	if err != nil {
+		log.Printf("Err: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
 func Serve() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", rootHandler)
+	mux.HandleFunc("/new/", postHandler)
 
 	wrappedMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m := httpsnoop.CaptureMetrics(mux, w, r)
