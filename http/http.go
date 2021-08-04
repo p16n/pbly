@@ -8,7 +8,28 @@ import (
 
 	"github.com/felixge/httpsnoop"
 	"github.com/p16n/pbdb/db"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
+)
+
+var (
+	requestsCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "pbly_requests",
+			Help: "The total number of requests",
+		},
+		[]string{"url", "method", "status"},
+	)
+
+	requestDurationGauge = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "pbly_request_duration",
+			Help: "The duration of each request in microseconds (µs)",
+		},
+		[]string{"url", "method", "status"},
+	)
 )
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +89,7 @@ func Serve() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", rootHandler)
 	mux.HandleFunc("/new/", postHandler)
+	mux.Handle("/metrics/", promhttp.Handler())
 
 	wrappedMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m := httpsnoop.CaptureMetrics(mux, w, r)
@@ -79,6 +101,18 @@ func Serve() {
 			m.Duration,
 			m.Written,
 		)
+
+		requestsCounter.WithLabelValues(
+			fmt.Sprintf("%s", r.URL),
+			fmt.Sprintf("%s", r.Method),
+			fmt.Sprintf("%d", m.Code),
+		).Inc()
+
+		requestDurationGauge.WithLabelValues(
+			fmt.Sprintf("%s", r.URL),
+			fmt.Sprintf("%s", r.Method),
+			fmt.Sprintf("%d", m.Code),
+		).Set(float64(m.Duration))
 	})
 
 	port := fmt.Sprintf(":%s", viper.GetString("port"))
